@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animemax Shorts Generator (Fixed Image Loading & Export)</title>
+    <title>Animemax Shorts Generator (Export & Data Fixed)</title>
+    <!-- HTML2Canvas CDN for exporting high-res images -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
@@ -366,7 +367,8 @@
         <div class="control-group">
             <label>Release Month & Year</label>
             <select id="monthSelect">
-                </select>
+                <!-- Automatically generated via JavaScript -->
+            </select>
         </div>
         <div class="control-group">
             <label>Filter By Genre / Tag</label>
@@ -468,8 +470,22 @@
 
         generateDynamicDropdown();
 
+        // Fix for html2canvas blank images: Convert remote URLs to local Blob URLs
+        async function convertToBlobUrl(url) {
+            if (!url || url.startsWith('data:')) return url;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("Network error");
+                const blob = await response.blob();
+                return URL.createObjectURL(blob);
+            } catch (err) {
+                console.warn("Direct blob fetch failed, falling back to proxy for:", url);
+                return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+            }
+        }
+
         async function generateLayout() {
-            loader.innerText = "Querying AniList & MAL Database...";
+            loader.innerText = "Querying AniList Database & Fetching Media...";
             loader.style.display = 'block';
             
             const [targetYear, targetMonthNum] = monthSelect.value.split('-').map(Number);
@@ -514,11 +530,15 @@
             const result = await response.json();
             const topMedia = result.data?.Page?.media?.[0];
             
+            let rawGenreImg = "";
             if (topMedia) {
-                dynamicGenreImage = topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large || "";
+                rawGenreImg = topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large || "";
             } else {
-                dynamicGenreImage = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600";
+                rawGenreImg = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600";
             }
+            
+            // Convert hook image to blob to prevent html2canvas blocking
+            dynamicGenreImage = await convertToBlobUrl(rawGenreImg);
         }
 
         async function fetchFromAniList(genreOrTag, monthNum, monthName, targetYear) {
@@ -538,6 +558,7 @@
                             english
                             romaji
                         }
+                        format
                         episodes
                         genres
                         tags {
@@ -589,9 +610,14 @@
 
             let filteredMediaList = allMedia.filter(anime => anime.startDate && anime.startDate.month === monthNum);
 
-            currentSlidesData = filteredMediaList.map(anime => {
+            // Fetch and convert all images for the UI
+            currentSlidesData = await Promise.all(filteredMediaList.map(async (anime) => {
                 const title = anime.title.english || anime.title.romaji;
-                const episodes = anime.episodes ? `${anime.episodes}` : "12+";
+                
+                // FIXED DATA: Accurate Format and Episodes instead of Sub/Dub assumption
+                let formatText = anime.format ? anime.format.replace('_', ' ') : 'TV';
+                let epsText = anime.episodes ? `${anime.episodes} EPS` : "TBA EPS";
+                let accurateInfoLine = `${formatText} | ${epsText}`;
                 
                 let displayGenres = anime.genres ? anime.genres.slice(0, 2) : [];
                 const hasIsekaiTag = anime.tags?.some(t => t.name === "Isekai");
@@ -600,24 +626,26 @@
                 }
                 const genreString = displayGenres.slice(0, 3).join(" • ");
                 
-                let images = [];
-                if (anime.coverImage?.extraLarge) images.push(anime.coverImage.extraLarge);
-                if (anime.bannerImage) images.push(anime.bannerImage);
+                let rawImages = [];
+                if (anime.coverImage?.extraLarge) rawImages.push(anime.coverImage.extraLarge);
+                if (anime.bannerImage) rawImages.push(anime.bannerImage);
                 
                 if (anime.characters?.nodes) {
                     anime.characters.nodes.forEach(char => {
-                        if (char.image?.large && images.length < 4) {
-                            images.push(char.image.large);
+                        if (char.image?.large && rawImages.length < 4) {
+                            rawImages.push(char.image.large);
                         }
                     });
                 }
                 
-                // Reliable SVG placeholder if an image is missing
                 const fallbackImg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600' viewBox='0 0 400 600'><rect width='100%' height='100%' fill='%23181820'/><text x='50%' y='50%' fill='%23555566' font-family='sans-serif' font-size='20' font-weight='bold' text-anchor='middle' dominant-baseline='middle'>AniList Image</text></svg>";
 
-                while (images.length < 4) {
-                    images.push(anime.coverImage?.large || images[0] || fallbackImg);
+                while (rawImages.length < 4) {
+                    rawImages.push(anime.coverImage?.large || rawImages[0] || fallbackImg);
                 }
+
+                // Process images into safe Blob URLs so html2canvas never fails
+                const safeImages = await Promise.all(rawImages.slice(0,4).map(img => convertToBlobUrl(img)));
 
                 let dateText = `Releasing: ${monthName} ${targetYear}`;
                 if (anime.startDate?.month) {
@@ -627,17 +655,12 @@
 
                 return {
                     title: title,
-                    episodes: episodes,
+                    episodesInfo: accurateInfoLine,
                     genres: genreString,
                     releaseText: dateText,
-                    images: images.slice(0, 4)
+                    images: safeImages
                 };
-            });
-        }
-
-        // Helper: Builds an image tag that automatically removes CORS rules if local browser blocks it
-        function getSmartImgTag(url, alt) {
-            return `<img src="${url}" alt="${alt}" crossorigin="anonymous" onerror="if(this.getAttribute('crossorigin')){this.removeAttribute('crossorigin');this.src='${url}';}">`;
+            }));
         }
 
         function buildHTML(genre, monthName, targetYear) {
@@ -669,17 +692,18 @@
                 const animeSlide = document.createElement('div');
                 animeSlide.className = 'slide';
 
+                // Standard image tags now that they are converted to local blobs
                 animeSlide.innerHTML = `
                     <div class="vierkant-grid">
-                        ${getSmartImgTag(anime.images[0], 'grid-img-1')}
-                        ${getSmartImgTag(anime.images[1], 'grid-img-2')}
-                        ${getSmartImgTag(anime.images[3], 'grid-img-3')}
-                        ${getSmartImgTag(anime.images[2], 'grid-img-4')}
+                        <img src="${anime.images[0]}" alt="grid-img-1">
+                        <img src="${anime.images[1]}" alt="grid-img-2">
+                        <img src="${anime.images[3]}" alt="grid-img-3">
+                        <img src="${anime.images[2]}" alt="grid-img-4">
                     </div>
                     <div class="slide-overlay">
                         <div class="anime-tags">${anime.genres}</div>
                         <div class="anime-title">${anime.title}</div>
-                        <div class="anime-info-line">${anime.episodes} Episodes | Sub•Dub</div>
+                        <div class="anime-info-line">${anime.episodesInfo}</div>
                         <div class="anime-date">${anime.releaseText}</div>
                     </div>
                 `;
@@ -719,9 +743,10 @@
 
         // --- HIGH-RES IMAGE EXPORT LOGIC ---
         async function exportCanvasToImage(slideIndexNumber) {
+            // allowTaint must be false now so toDataURL works. useCORS stays true.
             return await html2canvas(shortsPlayer, {
                 useCORS: true,
-                allowTaint: true,
+                allowTaint: false,
                 scale: 2,
                 backgroundColor: '#000000',
                 logging: false
@@ -745,7 +770,7 @@
                 triggerDownload(canvas, `AnimeMax_Slide_${currentSlideIdx + 1}.png`);
             } catch (err) {
                 console.error("Export error:", err);
-                alert("Failed to export image.");
+                alert("Failed to export image. Check console for details.");
             } finally {
                 downloadCurrentBtn.innerText = origText;
                 downloadCurrentBtn.disabled = false;
