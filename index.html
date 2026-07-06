@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animemax Shorts Generator (Base64 Export Fix)</title>
+    <title>Animemax Shorts Generator (Fixed Image Loading & Export)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
@@ -241,6 +241,12 @@
             text-shadow: 0 3px 10px rgba(0,0,0,0.8);
         }
 
+        .anime-info-line {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: #02a9ff;
+        }
+
         .anime-date {
             font-size: 0.88rem;
             font-weight: 800;
@@ -410,6 +416,8 @@
 
     <script>
         const ANILIST_CONFIG = {
+            clientId: "41604",
+            clientSecret: "A1z4JER5XqPuyhUIIMtnkAow1zCY2vBVzTSOcSbh",
             graphqlEndpoint: "https://graphql.anilist.co"
         };
 
@@ -460,38 +468,8 @@
 
         generateDynamicDropdown();
 
-        // 100% Bulletproof Image Fix: Converts external images directly to Base64 strings.
-        // This guarantees html2canvas will NOT hit a CORS block locally.
-        async function getBase64Image(url) {
-            if (!url || url.startsWith('data:')) return url;
-            
-            // Proxies to strip CORS headers securely
-            const proxies = [
-                `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-                `https://corsproxy.io/?${encodeURIComponent(url)}`
-            ];
-
-            for (let proxy of proxies) {
-                try {
-                    const res = await fetch(proxy);
-                    if (!res.ok) continue;
-                    const blob = await res.blob();
-                    
-                    return await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    });
-                } catch (err) {
-                    console.warn("Proxy failed, trying next...", err);
-                }
-            }
-            return url; // Extreme fallback
-        }
-
         async function generateLayout() {
-            loader.innerText = "Fetching Anime & Converting Images (This takes a few seconds)...";
+            loader.innerText = "Querying AniList & MAL Database...";
             loader.style.display = 'block';
             
             const [targetYear, targetMonthNum] = monthSelect.value.split('-').map(Number);
@@ -503,8 +481,8 @@
                 await fetchFromAniList(genreSelection, targetMonthNum, targetMonthName, targetYear);
                 buildHTML(genreSelection, targetMonthName, targetYear);
             } catch (error) {
-                console.error("Fetch Error:", error);
-                alert("Error fetching data. Please try again.");
+                console.error("AniList Fetch Error:", error);
+                alert("Error fetching from AniList. Please try again.");
             } finally {
                 loader.style.display = 'none';
             }
@@ -536,9 +514,11 @@
             const result = await response.json();
             const topMedia = result.data?.Page?.media?.[0];
             
-            let rawGenreImg = topMedia ? (topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large) : "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600";
-            
-            dynamicGenreImage = await getBase64Image(rawGenreImg);
+            if (topMedia) {
+                dynamicGenreImage = topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large || "";
+            } else {
+                dynamicGenreImage = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600";
+            }
         }
 
         async function fetchFromAniList(genreOrTag, monthNum, monthName, targetYear) {
@@ -553,10 +533,12 @@
             query ($season: MediaSeason, $seasonYear: Int, $genre: String, $tag: String) {
                 Page(page: 1, perPage: 50) {
                     media(season: $season, seasonYear: $seasonYear, genre: $genre, tag: $tag, type: ANIME, sort: POPULARITY_DESC) {
+                        id
                         title {
                             english
                             romaji
                         }
+                        episodes
                         genres
                         tags {
                             name
@@ -607,9 +589,9 @@
 
             let filteredMediaList = allMedia.filter(anime => anime.startDate && anime.startDate.month === monthNum);
 
-            // Fetch and convert ALL images to Base64
-            currentSlidesData = await Promise.all(filteredMediaList.map(async (anime) => {
+            currentSlidesData = filteredMediaList.map(anime => {
                 const title = anime.title.english || anime.title.romaji;
+                const episodes = anime.episodes ? `${anime.episodes}` : "12+";
                 
                 let displayGenres = anime.genres ? anime.genres.slice(0, 2) : [];
                 const hasIsekaiTag = anime.tags?.some(t => t.name === "Isekai");
@@ -618,26 +600,24 @@
                 }
                 const genreString = displayGenres.slice(0, 3).join(" • ");
                 
-                let rawImages = [];
-                if (anime.coverImage?.extraLarge) rawImages.push(anime.coverImage.extraLarge);
-                if (anime.bannerImage) rawImages.push(anime.bannerImage);
+                let images = [];
+                if (anime.coverImage?.extraLarge) images.push(anime.coverImage.extraLarge);
+                if (anime.bannerImage) images.push(anime.bannerImage);
                 
                 if (anime.characters?.nodes) {
                     anime.characters.nodes.forEach(char => {
-                        if (char.image?.large && rawImages.length < 4) {
-                            rawImages.push(char.image.large);
+                        if (char.image?.large && images.length < 4) {
+                            images.push(char.image.large);
                         }
                     });
                 }
                 
+                // Reliable SVG placeholder if an image is missing
                 const fallbackImg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600' viewBox='0 0 400 600'><rect width='100%' height='100%' fill='%23181820'/><text x='50%' y='50%' fill='%23555566' font-family='sans-serif' font-size='20' font-weight='bold' text-anchor='middle' dominant-baseline='middle'>AniList Image</text></svg>";
 
-                while (rawImages.length < 4) {
-                    rawImages.push(anime.coverImage?.large || rawImages[0] || fallbackImg);
+                while (images.length < 4) {
+                    images.push(anime.coverImage?.large || images[0] || fallbackImg);
                 }
-
-                // Wait for all 4 images to be converted to Base64 text strings securely
-                const safeImages = await Promise.all(rawImages.slice(0,4).map(img => getBase64Image(img)));
 
                 let dateText = `Releasing: ${monthName} ${targetYear}`;
                 if (anime.startDate?.month) {
@@ -647,11 +627,17 @@
 
                 return {
                     title: title,
+                    episodes: episodes,
                     genres: genreString,
                     releaseText: dateText,
-                    images: safeImages
+                    images: images.slice(0, 4)
                 };
-            }));
+            });
+        }
+
+        // Helper: Builds an image tag that automatically removes CORS rules if local browser blocks it
+        function getSmartImgTag(url, alt) {
+            return `<img src="${url}" alt="${alt}" crossorigin="anonymous" onerror="if(this.getAttribute('crossorigin')){this.removeAttribute('crossorigin');this.src='${url}';}">`;
         }
 
         function buildHTML(genre, monthName, targetYear) {
@@ -683,17 +669,17 @@
                 const animeSlide = document.createElement('div');
                 animeSlide.className = 'slide';
 
-                // We inject the Base64 images here. No external URLs means zero CORS errors.
                 animeSlide.innerHTML = `
                     <div class="vierkant-grid">
-                        <img src="${anime.images[0]}" alt="grid-img-1">
-                        <img src="${anime.images[1]}" alt="grid-img-2">
-                        <img src="${anime.images[3]}" alt="grid-img-3">
-                        <img src="${anime.images[2]}" alt="grid-img-4">
+                        ${getSmartImgTag(anime.images[0], 'grid-img-1')}
+                        ${getSmartImgTag(anime.images[1], 'grid-img-2')}
+                        ${getSmartImgTag(anime.images[3], 'grid-img-3')}
+                        ${getSmartImgTag(anime.images[2], 'grid-img-4')}
                     </div>
                     <div class="slide-overlay">
                         <div class="anime-tags">${anime.genres}</div>
                         <div class="anime-title">${anime.title}</div>
+                        <div class="anime-info-line">${anime.episodes} Episodes | Sub•Dub</div>
                         <div class="anime-date">${anime.releaseText}</div>
                     </div>
                 `;
@@ -733,10 +719,9 @@
 
         // --- HIGH-RES IMAGE EXPORT LOGIC ---
         async function exportCanvasToImage(slideIndexNumber) {
-            // allowTaint is false because base64 data handles it safely
             return await html2canvas(shortsPlayer, {
                 useCORS: true,
-                allowTaint: false,
+                allowTaint: true,
                 scale: 2,
                 backgroundColor: '#000000',
                 logging: false
@@ -760,7 +745,7 @@
                 triggerDownload(canvas, `AnimeMax_Slide_${currentSlideIdx + 1}.png`);
             } catch (err) {
                 console.error("Export error:", err);
-                alert("Failed to export image. Check console for details.");
+                alert("Failed to export image.");
             } finally {
                 downloadCurrentBtn.innerText = origText;
                 downloadCurrentBtn.disabled = false;
