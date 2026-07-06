@@ -3,13 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animemax Shorts Generator (Future-Proof Engine)</title>
+    <title>Animemax Shorts Generator (Fixed Image Loading & Export)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
             --bg-dark: #09090b;
             --panel-bg: #14141b;
             --accent: #02a9ff;
             --accent-pink: #ff0055;
+            --accent-green: #00e599;
             --text: #ffffff;
             --text-muted: #a1a1aa;
         }
@@ -262,11 +264,11 @@
         .nav-panel {
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 12px;
             background: var(--panel-bg);
             padding: 22px;
             border-radius: 14px;
-            width: 270px;
+            width: 280px;
             border: 1px solid #2a2a35;
             box-shadow: 0 10px 35px rgba(0,0,0,0.6);
         }
@@ -290,6 +292,27 @@
         .nav-btn:disabled {
             opacity: 0.4;
             cursor: not-allowed;
+        }
+
+        .btn-download {
+            background: linear-gradient(135deg, #00b09b, #96c93d);
+            color: #000;
+            font-weight: 800;
+        }
+
+        .btn-download:hover:not(:disabled) {
+            background: linear-gradient(135deg, #00c8b0, #a8e045);
+            box-shadow: 0 4px 15px rgba(0, 229, 153, 0.3);
+        }
+
+        .btn-download-all {
+            background: linear-gradient(135deg, #8a2387, #e94057, #f27121);
+            color: #fff;
+            font-weight: 800;
+        }
+
+        .btn-download-all:hover:not(:disabled) {
+            box-shadow: 0 4px 15px rgba(233, 64, 87, 0.4);
         }
 
         .status-badge {
@@ -343,8 +366,7 @@
         <div class="control-group">
             <label>Release Month & Year</label>
             <select id="monthSelect">
-                <!-- Wordt automatisch dynamisch gegenereerd door JS op basis van de huidige datum -->
-            </select>
+                </select>
         </div>
         <div class="control-group">
             <label>Filter By Genre / Tag</label>
@@ -373,19 +395,21 @@
         </div>
 
         <div class="nav-panel">
-            <label>Screenshot Navigation</label>
+            <label>Navigation</label>
             <button class="nav-btn" id="prevBtn" disabled>⏮ Previous Slide</button>
             <button class="nav-btn" id="nextBtn" disabled>Next Slide ⏭</button>
             <div class="status-badge" id="slideCounter">Slide: 0 / 0</div>
             
             <hr style="border-color:#2a2a35; margin: 4px 0;">
             
-            <label>AniList API Config</label>
-            <div class="status-badge" style="color:#02a9ff; font-family:monospace; font-size:0.75rem; word-break: break-all;">
-                ID: 41604
-            </div>
+            <label>Export Tools (9:16 PNG)</label>
+            <button class="nav-btn btn-download" id="downloadCurrentBtn" disabled>📥 Download Current Slide</button>
+            <button class="nav-btn btn-download-all" id="downloadAllBtn" disabled>📦 Download All Slides</button>
+            
+            <hr style="border-color:#2a2a35; margin: 4px 0;">
+            
             <div class="status-badge" style="color:#00ff88; font-size:0.75rem;">
-                Status: Direct Dynamic Ready
+                High-Res Engine: 720x1280px Ready
             </div>
         </div>
     </div>
@@ -410,16 +434,17 @@
         const nextBtn = document.getElementById('nextBtn');
         const slideCounter = document.getElementById('slideCounter');
         const monthSelect = document.getElementById('monthSelect');
+        const downloadCurrentBtn = document.getElementById('downloadCurrentBtn');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
 
-        // --- AUTOMATISCHE DROPDOWN GENERATOR (Toekomstbestendig) ---
+        // Dynamic dropdown generation
         function generateDynamicDropdown() {
             const now = new Date();
-            let currentMonth = now.getMonth() + 1; // 1 - 12
+            let currentMonth = now.getMonth() + 1;
             let currentYear = now.getFullYear();
 
             monthSelect.innerHTML = "";
 
-            // Genereer de komende 12 maanden vanaf NU op de kalender
             for (let i = 0; i < 12; i++) {
                 let m = currentMonth + i;
                 let y = currentYear;
@@ -435,20 +460,18 @@
                 else if (m >= 4 && m <= 6) season = "SPRING";
 
                 const opt = document.createElement('option');
-                opt.value = `${y}-${m}`; // Slaat jaar en maand op als b.v. "2026-8" of "2027-1"
+                opt.value = `${y}-${m}`;
                 opt.innerText = `${monthNames[m]} ${y} (${season} Season)`;
                 monthSelect.appendChild(opt);
             }
         }
 
-        // Run direct bij opstarten
         generateDynamicDropdown();
 
         async function generateLayout() {
             loader.innerText = "Querying AniList & MAL Database...";
             loader.style.display = 'block';
             
-            // Splits de waarde van de dropdown in het juiste jaar en de juiste maand
             const [targetYear, targetMonthNum] = monthSelect.value.split('-').map(Number);
             const targetMonthName = monthNames[targetMonthNum];
             const genreSelection = document.getElementById('genreSelect').value;
@@ -459,7 +482,7 @@
                 buildHTML(genreSelection, targetMonthName, targetYear);
             } catch (error) {
                 console.error("AniList Fetch Error:", error);
-                alert("Fout bij ophalen van data via AniList. Probeer opnieuw of kies een ander genre.");
+                alert("Error fetching from AniList. Please try again.");
             } finally {
                 loader.style.display = 'none';
             }
@@ -543,7 +566,7 @@
 
             const variables = {
                 season: season,
-                seasonYear: targetYear // Gebruikt nu dynamisch het gekozen jaar van de dropdown!
+                seasonYear: targetYear
             };
 
             if (isIsekai) {
@@ -589,8 +612,11 @@
                     });
                 }
                 
+                // Reliable SVG placeholder if an image is missing
+                const fallbackImg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600' viewBox='0 0 400 600'><rect width='100%' height='100%' fill='%23181820'/><text x='50%' y='50%' fill='%23555566' font-family='sans-serif' font-size='20' font-weight='bold' text-anchor='middle' dominant-baseline='middle'>AniList Image</text></svg>";
+
                 while (images.length < 4) {
-                    images.push(anime.coverImage?.large || images[0] || "https://via.placeholder.com/400x600/181820/ffffff?text=Anime");
+                    images.push(anime.coverImage?.large || images[0] || fallbackImg);
                 }
 
                 let dateText = `Releasing: ${monthName} ${targetYear}`;
@@ -607,6 +633,11 @@
                     images: images.slice(0, 4)
                 };
             });
+        }
+
+        // Helper: Builds an image tag that automatically removes CORS rules if local browser blocks it
+        function getSmartImgTag(url, alt) {
+            return `<img src="${url}" alt="${alt}" crossorigin="anonymous" onerror="if(this.getAttribute('crossorigin')){this.removeAttribute('crossorigin');this.src='${url}';}">`;
         }
 
         function buildHTML(genre, monthName, targetYear) {
@@ -640,10 +671,10 @@
 
                 animeSlide.innerHTML = `
                     <div class="vierkant-grid">
-                        <img src="${anime.images[0]}" alt="grid-img-1">
-                        <img src="${anime.images[1]}" alt="grid-img-2">
-                        <img src="${anime.images[3]}" alt="grid-img-3">
-                        <img src="${anime.images[2]}" alt="grid-img-4">
+                        ${getSmartImgTag(anime.images[0], 'grid-img-1')}
+                        ${getSmartImgTag(anime.images[1], 'grid-img-2')}
+                        ${getSmartImgTag(anime.images[3], 'grid-img-3')}
+                        ${getSmartImgTag(anime.images[2], 'grid-img-4')}
                     </div>
                     <div class="slide-overlay">
                         <div class="anime-tags">${anime.genres}</div>
@@ -663,11 +694,15 @@
             if (totalSlides <= 1) {
                 prevBtn.disabled = true;
                 nextBtn.disabled = true;
+                downloadCurrentBtn.disabled = true;
+                downloadAllBtn.disabled = true;
                 slideCounter.innerText = `Slide: 0 / 0`;
                 return;
             }
             prevBtn.disabled = currentSlideIdx === 0;
             nextBtn.disabled = currentSlideIdx === totalSlides - 1;
+            downloadCurrentBtn.disabled = false;
+            downloadAllBtn.disabled = false;
             slideCounter.innerText = `Slide: ${currentSlideIdx + 1} / ${totalSlides}`;
         }
 
@@ -681,6 +716,82 @@
 
             updateNav(slides.length);
         }
+
+        // --- HIGH-RES IMAGE EXPORT LOGIC ---
+        async function exportCanvasToImage(slideIndexNumber) {
+            return await html2canvas(shortsPlayer, {
+                useCORS: true,
+                allowTaint: true,
+                scale: 2,
+                backgroundColor: '#000000',
+                logging: false
+            });
+        }
+
+        function triggerDownload(canvas, filename) {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        downloadCurrentBtn.addEventListener('click', async () => {
+            const origText = downloadCurrentBtn.innerText;
+            downloadCurrentBtn.innerText = "⏳ Saving...";
+            downloadCurrentBtn.disabled = true;
+
+            try {
+                const canvas = await exportCanvasToImage(currentSlideIdx);
+                triggerDownload(canvas, `AnimeMax_Slide_${currentSlideIdx + 1}.png`);
+            } catch (err) {
+                console.error("Export error:", err);
+                alert("Failed to export image.");
+            } finally {
+                downloadCurrentBtn.innerText = origText;
+                downloadCurrentBtn.disabled = false;
+            }
+        });
+
+        downloadAllBtn.addEventListener('click', async () => {
+            const slides = shortsPlayer.querySelectorAll('.slide');
+            if (!slides || slides.length === 0) return;
+
+            const origText = downloadAllBtn.innerText;
+            downloadAllBtn.disabled = true;
+            downloadCurrentBtn.disabled = true;
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+
+            const originalIdx = currentSlideIdx;
+
+            try {
+                for (let i = 0; i < slides.length; i++) {
+                    downloadAllBtn.innerText = `⏳ Saving (${i + 1}/${slides.length})...`;
+                    
+                    slides[currentSlideIdx].classList.remove('active');
+                    currentSlideIdx = i;
+                    slides[currentSlideIdx].classList.add('active');
+                    slideCounter.innerText = `Slide: ${currentSlideIdx + 1} / ${slides.length}`;
+
+                    await new Promise(r => setTimeout(r, 350));
+
+                    const canvas = await exportCanvasToImage(i);
+                    triggerDownload(canvas, `AnimeMax_Slide_${i + 1}.png`);
+
+                    await new Promise(r => setTimeout(r, 450));
+                }
+            } catch (err) {
+                console.error("Batch download error:", err);
+                alert("An error occurred during batch download.");
+            } finally {
+                slides[currentSlideIdx].classList.remove('active');
+                currentSlideIdx = originalIdx;
+                slides[currentSlideIdx].classList.add('active');
+
+                downloadAllBtn.innerText = origText;
+                updateNav(slides.length);
+            }
+        });
 
         fetchBtn.addEventListener('click', generateLayout);
         prevBtn.addEventListener('click', () => changeSlide(-1));
