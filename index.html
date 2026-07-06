@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Animemax Shorts Generator (AniList & MAL Engine)</title>
+    <style>
+        :root {
+            --bg-dark: #09090b;
+            --panel-bg: #14141b;
+            --accent: #02a9ff;
+            --accent-pink: #ff0055;
+            --text: #ffffff;
+            --text-muted: #a1a1aa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+            max-width: 800px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            color: var(--accent);
+            margin-bottom: 5px;
+            font-weight: 900;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* Control Panel */
+        .controls {
+            background-color: var(--panel-bg);
+            padding: 22px;
+            border-radius: 14px;
+            width: 100%;
+            max-width: 950px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 30px;
+            border: 1px solid #2a2a35;
+            box-shadow: 0 10px 35px rgba(0,0,0,0.6);
+        }
+
+        .control-group {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        select, button {
+            background: #22222a;
+            color: white;
+            border: 1px solid #333344;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        select:focus {
+            border-color: var(--accent);
+        }
+
+        button.btn-primary {
+            background: linear-gradient(135deg, var(--accent), #0077ff);
+            color: #fff;
+            font-weight: 800;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(2, 169, 255, 0.3);
+        }
+
+        button.btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(2, 169, 255, 0.5);
+            background: linear-gradient(135deg, #20b8ff, #0088ff);
+        }
+
+        .workspace {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            max-width: 950px;
+            justify-content: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        /* 9:16 Shorts Canvas */
+        .shorts-player {
+            width: 360px;
+            height: 640px;
+            background: #000;
+            border-radius: 18px;
+            position: relative;
+            overflow: hidden;
+            border: 3px solid #2a2a35;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+        }
+
+        .slide {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: none;
+        }
+
+        .slide.active {
+            display: block;
+        }
+
+        /* Hook Slide Layout */
+        .hook-content {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            text-align: center;
+            background-size: cover;
+            background-position: center;
+            z-index: 5;
+        }
+
+        .hook-content h2 {
+            font-size: 3rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            line-height: 1.15;
+            color: #ffffff;
+            text-shadow: 
+                0px 4px 20px rgba(0,0,0,1),
+                0px 2px 5px rgba(0,0,0,0.8),
+                2px 2px 0 #000,
+               -2px -2px 0 #000,
+                2px -2px 0 #000,
+               -2px  2px 0 #000;
+        }
+
+        /* 2x2 Grid Layout - Fixed Image Fitting */
+        .vierkant-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 2px; /* Small gap makes it look like a clean comic panel */
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            background: #000;
+        }
+
+        .vierkant-grid img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: 50% 20%; /* Prioritizes upper portion so faces don't cut off */
+            background-color: #181820;
+        }
+
+        /* Overlay Glassmorphism Box */
+        .slide-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 92%;
+            padding: 24px 15px;
+            text-align: center;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: rgba(12, 12, 16, 0.85); /* Darker, cleaner box */
+            backdrop-filter: blur(8px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.9);
+        }
+
+        /* Text Styling Fixes */
+        .anime-tags {
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: #a1a1aa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: -4px;
+        }
+
+        .anime-title {
+            font-size: 1.55rem;
+            font-weight: 900;
+            color: #ffffff;
+            line-height: 1.2;
+            text-transform: uppercase;
+            letter-spacing: 0px;
+            text-shadow: 0 3px 10px rgba(0,0,0,0.8);
+            /* Removed the ugly -webkit-text-stroke */
+        }
+
+        .anime-info-line {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: #02a9ff;
+        }
+
+        .anime-date {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #fff;
+            background: var(--accent-pink);
+            padding: 6px 20px;
+            border-radius: 25px;
+            margin-top: 6px;
+            box-shadow: 0 4px 15px rgba(255, 0, 85, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Navigation */
+        .nav-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            background: var(--panel-bg);
+            padding: 22px;
+            border-radius: 14px;
+            width: 270px;
+            border: 1px solid #2a2a35;
+            box-shadow: 0 10px 35px rgba(0,0,0,0.6);
+        }
+
+        .nav-btn {
+            width: 100%;
+            font-weight: bold;
+            padding: 12px;
+            background: #2a2a35;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .nav-btn:hover:not(:disabled) {
+            background: #3a3a48;
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .status-badge {
+            font-size: 0.8rem;
+            text-align: center;
+            color: var(--text-muted);
+            padding: 8px;
+            border-radius: 6px;
+            background: #1a1a24;
+            font-weight: 600;
+        }
+
+        .engine-badge {
+            display: inline-block;
+            background: rgba(2, 169, 255, 0.15);
+            color: var(--accent);
+            border: 1px solid rgba(2, 169, 255, 0.4);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-weight: bold;
+            display: none;
+            z-index: 20;
+            background: var(--accent);
+            padding: 14px 28px;
+            border-radius: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.9);
+            text-align: center;
+            width: 85%;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Animemax Visualizer</h1>
+        <p>Powered exclusively by <span class="engine-badge">AniList & MAL GraphQL Engine</span></p>
+    </header>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Release Month (2026)</label>
+            <select id="monthSelect">
+                <option value="7" selected>July (Summer Season)</option>
+                <option value="8">August (Summer Season)</option>
+                <option value="9">September (Summer Season)</option>
+                <option value="10">October (Fall Season)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Filter By Genre / Tag</label>
+            <select id="genreSelect">
+                <option value="Isekai">Isekai</option>
+                <option value="Action">Action</option>
+                <option value="Fantasy">Fantasy</option>
+                <option value="Sci-Fi">Sci-Fi</option>
+                <option value="Romance">Romance</option>
+            </select>
+        </div>
+        <div class="control-group" style="justify-content: flex-end;">
+            <button class="btn-primary" id="fetchBtn">Generate Layout</button>
+        </div>
+    </div>
+
+    <div class="workspace">
+        <div class="shorts-player" id="shortsPlayer">
+            <div class="loader" id="loader">Syncing with AniList...</div>
+            
+            <div class="slide active" id="defaultSlide">
+                <div class="hook-content" style="background: radial-gradient(circle at center, #0b1c26 0%, #050508 100%);">
+                    <h2 style="font-size:2.3rem;">Ready to<br><span style="color:#02a9ff; display:block; font-size:2.7rem;">Generate</span></h2>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav-panel">
+            <label>Screenshot Navigation</label>
+            <button class="nav-btn" id="prevBtn" disabled>⏮ Previous Slide</button>
+            <button class="nav-btn" id="nextBtn" disabled>Next Slide ⏭</button>
+            <div class="status-badge" id="slideCounter">Slide: 0 / 0</div>
+            
+            <hr style="border-color:#2a2a35; margin: 4px 0;">
+            
+            <label>AniList API Config</label>
+            <div class="status-badge" style="color:#02a9ff; font-family:monospace; font-size:0.75rem; word-break: break-all;">
+                ID: 41604
+            </div>
+            <div class="status-badge" style="color:#00ff88; font-size:0.75rem;">
+                Status: Direct Vercel Ready
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ANILIST_CONFIG = {
+            clientId: "41604",
+            clientSecret: "A1z4JER5XqPuyhUIIMtnkAow1zCY2vBVzTSOcSbh",
+            graphqlEndpoint: "https://graphql.anilist.co"
+        };
+
+        const monthNames = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        
+        let currentSlidesData = [];
+        let currentSlideIdx = 0;
+        let dynamicGenreImage = "";
+
+        const fetchBtn = document.getElementById('fetchBtn');
+        const loader = document.getElementById('loader');
+        const shortsPlayer = document.getElementById('shortsPlayer');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const slideCounter = document.getElementById('slideCounter');
+
+        async function generateLayout() {
+            loader.innerText = "Querying AniList & MAL Database...";
+            loader.style.display = 'block';
+            
+            const targetMonthNum = parseInt(document.getElementById('monthSelect').value);
+            const targetMonthName = monthNames[targetMonthNum];
+            const genreSelection = document.getElementById('genreSelect').value;
+
+            try {
+                await fetchGenreRepresentativeImage(genreSelection);
+                await fetchFromAniList(genreSelection, targetMonthNum, targetMonthName);
+                buildHTML(genreSelection, targetMonthName);
+            } catch (error) {
+                console.error("AniList Fetch Error:", error);
+                alert("Fout bij ophalen van data via AniList. Probeer opnieuw of kies een ander genre.");
+            } finally {
+                loader.style.display = 'none';
+            }
+        }
+
+        async function fetchGenreRepresentativeImage(genreOrTag) {
+            const isIsekai = (genreOrTag === "Isekai");
+            const query = `
+            query ($genre: String, $tag: String) {
+                Page(page: 1, perPage: 1) {
+                    media(genre: $genre, tag: $tag, type: ANIME, sort: POPULARITY_DESC) {
+                        bannerImage
+                        coverImage {
+                            extraLarge
+                            large
+                        }
+                    }
+                }
+            }`;
+
+            const variables = isIsekai ? { tag: "Isekai" } : { genre: genreOrTag };
+
+            const response = await fetch(ANILIST_CONFIG.graphqlEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, variables })
+            });
+
+            const result = await response.json();
+            const topMedia = result.data?.Page?.media?.[0];
+            
+            if (topMedia) {
+                dynamicGenreImage = topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large || "";
+            } else {
+                dynamicGenreImage = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600";
+            }
+        }
+
+        async function fetchFromAniList(genreOrTag, monthNum, monthName) {
+            let season = "SUMMER";
+            if (monthNum >= 10) season = "FALL";
+            else if (monthNum <= 3) season = "WINTER";
+            else if (monthNum >= 4 && monthNum <= 6) season = "SPRING";
+
+            const isIsekai = (genreOrTag === "Isekai");
+            
+            // Added genres and tags to the API query
+            const query = `
+            query ($season: MediaSeason, $seasonYear: Int, $genre: String, $tag: String) {
+                Page(page: 1, perPage: 50) {
+                    media(season: $season, seasonYear: $seasonYear, genre: $genre, tag: $tag, type: ANIME, sort: POPULARITY_DESC) {
+                        id
+                        title {
+                            english
+                            romaji
+                        }
+                        episodes
+                        genres
+                        tags {
+                            name
+                        }
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        coverImage {
+                            extraLarge
+                            large
+                        }
+                        bannerImage
+                        characters(sort: FAVOURITES_DESC, perPage: 4) {
+                            nodes {
+                                image {
+                                    large
+                                }
+                            }
+                        }
+                    }
+                }
+            }`;
+
+            const variables = {
+                season: season,
+                seasonYear: 2026
+            };
+
+            if (isIsekai) {
+                variables.tag = "Isekai";
+            } else {
+                variables.genre = genreOrTag;
+            }
+
+            const response = await fetch(ANILIST_CONFIG.graphqlEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({ query, variables })
+            });
+
+            const result = await response.json();
+            let allMedia = result.data?.Page?.media || [];
+
+            let filteredMediaList = allMedia.filter(anime => anime.startDate && anime.startDate.month === monthNum);
+
+            currentSlidesData = filteredMediaList.map(anime => {
+                const title = anime.title.english || anime.title.romaji;
+                const episodes = anime.episodes ? `${anime.episodes}` : "12+";
+                
+                // Process Multiple Genres (Shows exactly what tags/genres it belongs to)
+                let displayGenres = anime.genres ? anime.genres.slice(0, 2) : [];
+                const hasIsekaiTag = anime.tags?.some(t => t.name === "Isekai");
+                if (hasIsekaiTag && !displayGenres.includes("Isekai")) {
+                    displayGenres.push("Isekai");
+                }
+                const genreString = displayGenres.slice(0, 3).join(" • ");
+                
+                let images = [];
+                if (anime.coverImage?.extraLarge) images.push(anime.coverImage.extraLarge);
+                if (anime.bannerImage) images.push(anime.bannerImage);
+                
+                if (anime.characters?.nodes) {
+                    anime.characters.nodes.forEach(char => {
+                        if (char.image?.large && images.length < 4) {
+                            images.push(char.image.large);
+                        }
+                    });
+                }
+                
+                while (images.length < 4) {
+                    images.push(anime.coverImage?.large || images[0] || "https://via.placeholder.com/400x600/181820/ffffff?text=Anime");
+                }
+
+                let dateText = `Releasing: ${monthName} 2026`;
+                if (anime.startDate?.month) {
+                    const mName = monthNames[anime.startDate.month];
+                    dateText = `Release Date: ${mName} ${anime.startDate.day || ''}, ${anime.startDate.year || 2026}`;
+                }
+
+                return {
+                    title: title,
+                    episodes: episodes,
+                    genres: genreString,
+                    releaseText: dateText,
+                    images: images.slice(0, 4)
+                };
+            });
+        }
+
+        function buildHTML(genre, monthName) {
+            const oldSlides = shortsPlayer.querySelectorAll('.slide');
+            oldSlides.forEach(el => el.remove());
+
+            if (currentSlidesData.length === 0) {
+                shortsPlayer.innerHTML += `
+                    <div class="slide active">
+                        <div class="hook-content" style="background: #111;">
+                            <h2>No ${genre} Anime<br>Found for ${monthName}</h2>
+                        </div>
+                    </div>
+                `;
+                updateNav(0);
+                return;
+            }
+
+            const hookSlide = document.createElement('div');
+            hookSlide.className = 'slide active';
+            hookSlide.innerHTML = `
+                <div class="hook-content" style="background-image: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.45)), url('${dynamicGenreImage}')">
+                    <h2>${genre} ANIME<br>RELEASING THIS ${monthName.toUpperCase()}</h2>
+                </div>
+            `;
+            shortsPlayer.appendChild(hookSlide);
+
+            currentSlidesData.forEach((anime) => {
+                const animeSlide = document.createElement('div');
+                animeSlide.className = 'slide';
+
+                animeSlide.innerHTML = `
+                    <div class="vierkant-grid">
+                        <img src="${anime.images[0]}" alt="grid-img-1">
+                        <img src="${anime.images[1]}" alt="grid-img-2">
+                        <img src="${anime.images[2]}" alt="grid-img-3">
+                        <img src="${anime.images[3]}" alt="grid-img-4">
+                    </div>
+                    <div class="slide-overlay">
+                        <div class="anime-tags">${anime.genres}</div>
+                        <div class="anime-title">${anime.title}</div>
+                        <div class="anime-info-line">${anime.episodes} Episodes | Sub•Dub</div>
+                        <div class="anime-date">${anime.releaseText}</div>
+                    </div>
+                `;
+                shortsPlayer.appendChild(animeSlide);
+            });
+
+            currentSlideIdx = 0;
+            updateNav(currentSlidesData.length + 1);
+        }
+
+        function updateNav(totalSlides) {
+            if (totalSlides <= 1) {
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                slideCounter.innerText = `Slide: 0 / 0`;
+                return;
+            }
+            prevBtn.disabled = currentSlideIdx === 0;
+            nextBtn.disabled = currentSlideIdx === totalSlides - 1;
+            slideCounter.innerText = `Slide: ${currentSlideIdx + 1} / ${totalSlides}`;
+        }
+
+        function changeSlide(direction) {
+            const slides = shortsPlayer.querySelectorAll('.slide');
+            if (slides.length === 0) return;
+
+            slides[currentSlideIdx].classList.remove('active');
+            currentSlideIdx += direction;
+            slides[currentSlideIdx].classList.add('active');
+
+            updateNav(slides.length);
+        }
+
+        fetchBtn.addEventListener('click', generateLayout);
+        prevBtn.addEventListener('click', () => changeSlide(-1));
+        nextBtn.addEventListener('click', () => changeSlide(1));
+    </script>
+</body>
+</html>
+
