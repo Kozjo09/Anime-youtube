@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Animemax Shorts Generator (Full Poster Layout)</title>
+    <title>Animemax Shorts Video Generator</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
@@ -82,7 +82,7 @@
             font-weight: 700;
         }
 
-        select, button {
+        select, button, input[type="file"] {
             background: #22222a;
             color: white;
             border: 1px solid #333344;
@@ -301,13 +301,8 @@
         }
 
         .btn-download-all {
-            background: linear-gradient(135deg, #8a2387, #e94057, #f27121);
+            background: linear-gradient(135deg, #2a2a35, #3a3a48);
             color: #fff;
-            font-weight: 800;
-        }
-
-        .btn-download-all:hover:not(:disabled) {
-            box-shadow: 0 4px 15px rgba(233, 64, 87, 0.4);
         }
 
         .status-badge {
@@ -348,6 +343,21 @@
             width: 85%;
             font-size: 0.95rem;
         }
+
+        .video-control-box {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            background: #1a1a24;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #2a2a35;
+        }
+
+        .video-control-box label {
+            font-size: 0.7rem;
+            color: var(--accent);
+        }
     </style>
 </head>
 <body>
@@ -360,8 +370,7 @@
     <div class="controls">
         <div class="control-group">
             <label>Release Month & Year</label>
-            <select id="monthSelect">
-            </select>
+            <select id="monthSelect"></select>
         </div>
         <div class="control-group">
             <label>Filter By Genre / Tag</label>
@@ -397,15 +406,34 @@
             
             <hr style="border-color:#2a2a35; margin: 4px 0;">
             
-            <label>Export Tools (9:16 PNG)</label>
+            <label>Image Export</label>
             <button class="nav-btn btn-download" id="downloadCurrentBtn" disabled>📥 Download Current Slide</button>
             <button class="nav-btn btn-download-all" id="downloadAllBtn" disabled>📦 Download All Slides</button>
             
             <hr style="border-color:#2a2a35; margin: 4px 0;">
             
-            <div class="status-badge" style="color:#00ff88; font-size:0.75rem;">
-                High-Res Engine: 720x1280px Ready
+            <label>Video Studio Engine</label>
+            <div class="video-control-box">
+                <label>Slide Duration</label>
+                <select id="durationSelect">
+                    <option value="2">2.0 Seconds per Anime</option>
+                    <option value="2.5" selected>2.5 Seconds per Anime</option>
+                    <option value="3">3.0 Seconds per Anime</option>
+                </select>
             </div>
+
+            <div class="video-control-box">
+                <label>Background Track</label>
+                <select id="musicSelect">
+                    <option value="procedural">🎵 AI 8-Bit Anime Synth (CORS-Safe)</option>
+                    <option value="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3">🎵 Neo-Tokyo Synthwave</option>
+                    <option value="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3">🎵 Lofi Anime Chill</option>
+                    <option value="custom">📁 Upload Custom MP3...</option>
+                </select>
+                <input type="file" id="customAudioFile" accept="audio/mp3,audio/*" style="display: none; padding: 4px; margin-top: 5px;">
+            </div>
+
+            <button class="nav-btn" id="downloadVideoBtn" style="background: linear-gradient(135deg, #ff0055, #ff5500); color: white; font-weight: 800;" disabled>🎬 Export Full Video (.WebM)</button>
         </div>
     </div>
 
@@ -431,6 +459,13 @@
         const monthSelect = document.getElementById('monthSelect');
         const downloadCurrentBtn = document.getElementById('downloadCurrentBtn');
         const downloadAllBtn = document.getElementById('downloadAllBtn');
+        const downloadVideoBtn = document.getElementById('downloadVideoBtn');
+        const musicSelect = document.getElementById('musicSelect');
+        const customAudioFile = document.getElementById('customAudioFile');
+
+        musicSelect.addEventListener('change', (e) => {
+            customAudioFile.style.display = (e.target.value === 'custom') ? 'block' : 'none';
+        });
 
         function generateDynamicDropdown() {
             const now = new Date();
@@ -557,7 +592,6 @@
 
             const isIsekai = (genreOrTag === "Isekai");
             
-            // Cleaned up query: Characters section completely removed since we only want 1 big poster
             const query = `
             query ($season: MediaSeason, $seasonYear: Int, $genre: String, $tag: String) {
                 Page(page: 1, perPage: 50) {
@@ -623,7 +657,6 @@
                 }
                 const genreString = displayGenres.slice(0, 3).join(" • ");
                 
-                // Fetch full poster art, with a reliable custom fallback if AniList data is missing
                 let posterImage = anime.coverImage?.extraLarge || anime.coverImage?.large || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600' viewBox='0 0 400 600'><rect width='100%' height='100%' fill='%2314141b'/><text x='50%' y='50%' fill='%23555566' font-family='sans-serif' font-size='18' font-weight='bold' text-anchor='middle'>Image Unavailable</text></svg>";
 
                 let dateText = `Releasing: ${monthName} ${targetYear}`;
@@ -677,7 +710,6 @@
             `;
             shortsPlayer.appendChild(hookSlide);
 
-            // Output all slides natively in high-end Single Poster configuration
             currentSlidesData.forEach((anime) => {
                 const animeSlide = document.createElement('div');
                 animeSlide.className = 'slide';
@@ -706,6 +738,7 @@
                 nextBtn.disabled = true;
                 downloadCurrentBtn.disabled = true;
                 downloadAllBtn.disabled = true;
+                downloadVideoBtn.disabled = true;
                 slideCounter.innerText = `Slide: 0 / 0`;
                 return;
             }
@@ -713,6 +746,7 @@
             nextBtn.disabled = currentSlideIdx === totalSlides - 1;
             downloadCurrentBtn.disabled = false;
             downloadAllBtn.disabled = false;
+            downloadVideoBtn.disabled = false;
             slideCounter.innerText = `Slide: ${currentSlideIdx + 1} / ${totalSlides}`;
         }
 
@@ -747,6 +781,185 @@
             link.download = filename;
             link.href = canvas.toDataURL('image/png');
             link.click();
+        }
+
+        function setupProceduralSynth(audioCtx, totalDuration) {
+            const outputGain = audioCtx.createGain();
+            outputGain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+
+            const notes = [261.63, 293.66, 329.63, 392.00, 440.00]; 
+            const startTime = audioCtx.currentTime;
+            
+            for (let time = 0; time < totalDuration; time += 0.4) {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = (Math.random() > 0.4) ? 'sine' : 'triangle';
+                const freq = notes[Math.floor(Math.random() * notes.length)] * (Math.random() > 0.75 ? 2 : 1);
+                
+                osc.frequency.setValueAtTime(freq, startTime + time);
+                gain.gain.setValueAtTime(0.08, startTime + time);
+                gain.gain.exponentialRampToValueAtTime(0.001, startTime + time + 0.35);
+                
+                osc.connect(gain);
+                gain.connect(outputGain);
+                osc.start(startTime + time);
+                osc.stop(startTime + time + 0.38);
+            }
+
+            for (let time = 0; time < totalDuration; time += 0.8) {
+                const kick = audioCtx.createOscillator();
+                const kickGain = audioCtx.createGain();
+                kick.frequency.setValueAtTime(75, startTime + time);
+                kick.frequency.exponentialRampToValueAtTime(0.01, startTime + time + 0.15);
+                
+                kickGain.gain.setValueAtTime(0.25, startTime + time);
+                kickGain.gain.exponentialRampToValueAtTime(0.001, startTime + time + 0.18);
+                
+                kick.connect(kickGain);
+                kickGain.connect(outputGain);
+                kick.start(startTime + time);
+                kick.stop(startTime + time + 0.2);
+            }
+
+            return outputGain;
+        }
+
+        async function exportToVideo() {
+            const slides = shortsPlayer.querySelectorAll('.slide');
+            if (!slides || slides.length === 0) return;
+
+            const origText = downloadVideoBtn.innerText;
+            downloadVideoBtn.disabled = true;
+            downloadCurrentBtn.disabled = true;
+            downloadAllBtn.disabled = true;
+
+            const slideDuration = parseFloat(document.getElementById('durationSelect').value);
+            const totalDuration = slides.length * slideDuration;
+            
+            const preRenderedCanvases = [];
+            const originalIdx = currentSlideIdx;
+
+            try {
+                // Step 1: Pre-render all panels asynchronously to optimize recorder performance
+                for (let i = 0; i < slides.length; i++) {
+                    downloadVideoBtn.innerText = `⏳ Pre-rendering layout (${i + 1}/${slides.length})...`;
+                    slides[currentSlideIdx].classList.remove('active');
+                    currentSlideIdx = i;
+                    slides[currentSlideIdx].classList.add('active');
+                    await new Promise(r => setTimeout(r, 120));
+                    
+                    const canvas = await exportCanvasToImage(i);
+                    preRenderedCanvases.push(canvas);
+                }
+                
+                slides[currentSlideIdx].classList.remove('active');
+                currentSlideIdx = originalIdx;
+                slides[currentSlideIdx].classList.add('active');
+                slideCounter.innerText = `Slide: ${currentSlideIdx + 1} / ${slides.length}`;
+
+                downloadVideoBtn.innerText = "🎬 Compiling Audio Stream...";
+
+                // Step 2: Build canvas pipelines and system logic nodes
+                const recCanvas = document.createElement('canvas');
+                recCanvas.width = 720;
+                recCanvas.height = 1280;
+                const recCtx = recCanvas.getContext('2d');
+
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const dest = audioCtx.createMediaStreamDestination();
+                
+                let audioNode;
+                let audioElem = null;
+                const musicVal = musicSelect.value;
+
+                if (musicVal === 'procedural') {
+                    audioNode = setupProceduralSynth(audioCtx, totalDuration);
+                    audioNode.connect(dest);
+                    audioNode.connect(audioCtx.destination);
+                } else {
+                    audioElem = document.createElement('audio');
+                    audioElem.crossOrigin = "anonymous";
+                    if (musicVal === 'custom') {
+                        if (customAudioFile.files.length === 0) {
+                            alert("Please upload a custom MP3 audio file first!");
+                            throw new Error("Missing audio element asset link mapping targets.");
+                        }
+                        audioElem.src = URL.createObjectURL(customAudioFile.files[0]);
+                    } else {
+                        audioElem.src = musicVal;
+                    }
+                    
+                    audioNode = audioCtx.createMediaElementSource(audioElem);
+                    audioNode.connect(dest);
+                    audioNode.connect(audioCtx.destination);
+                }
+
+                // Step 3: Instantiate Media Stream Engine pipelines
+                const videoStream = recCanvas.captureStream(30);
+                const combinedStream = new MediaStream();
+                videoStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
+                dest.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+
+                let options = { mimeType: 'video/webm;codecs=vp9,opus' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'video/webm;codecs=vp8,opus' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'video/webm' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = {};
+
+                const mediaRecorder = new MediaRecorder(combinedStream, options);
+                const chunks = [];
+                mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: options.mimeType || 'video/webm' });
+                    const videoURL = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = videoURL;
+                    link.download = `Animemax_Short_${Date.now()}.webm`;
+                    link.click();
+                    
+                    if (audioElem) audioElem.pause();
+                    audioCtx.close();
+                    
+                    downloadVideoBtn.innerText = origText;
+                    updateNav(slides.length);
+                };
+
+                mediaRecorder.start();
+                if (audioElem) audioElem.play();
+
+                const fps = 30;
+                const frameInterval = 1000 / fps;
+                let startTime = performance.now();
+                
+                // Step 4: Write high-speed frame cycles onto standard recording nodes
+                function recordFrameCycle() {
+                    let elapsed = (performance.now() - startTime) / 1000;
+                    if (elapsed >= totalDuration) {
+                        mediaRecorder.stop();
+                        return;
+                    }
+
+                    let indexTarget = Math.floor(elapsed / slideDuration);
+                    if (indexTarget >= preRenderedCanvases.length) {
+                        indexTarget = preRenderedCanvases.length - 1;
+                    }
+
+                    recCtx.clearRect(0, 0, recCanvas.width, recCanvas.height);
+                    recCtx.drawImage(preRenderedCanvases[indexTarget], 0, 0, recCanvas.width, recCanvas.height);
+
+                    downloadVideoBtn.innerText = `📹 Recording video: ${elapsed.toFixed(1)}s / ${totalDuration.toFixed(1)}s`;
+                    setTimeout(recordFrameCycle, frameInterval);
+                }
+
+                recordFrameCycle();
+
+            } catch (err) {
+                console.error("Video processing fault:", err);
+                alert("Recording crashed: " + err.message);
+                downloadVideoBtn.innerText = origText;
+                updateNav(slides.length);
+            }
         }
 
         downloadCurrentBtn.addEventListener('click', async () => {
@@ -807,6 +1020,7 @@
             }
         });
 
+        downloadVideoBtn.addEventListener('click', exportToVideo);
         fetchBtn.addEventListener('click', generateLayout);
         prevBtn.addEventListener('click', () => changeSlide(-1));
         nextBtn.addEventListener('click', () => changeSlide(1));
