@@ -113,6 +113,12 @@
             background: linear-gradient(135deg, #20b8ff, #0088ff);
         }
 
+        button.btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .workspace {
             display: flex;
             gap: 40px;
@@ -364,7 +370,7 @@
 
     <header>
         <h1>Animemax Visualizer</h1>
-        <p>Powered exclusively by <span class="engine-badge">AniList & MAL GraphQL Engine</span></p>
+        <p>Powered exclusively by <span class="engine-badge">AniList GraphQL Engine</span></p>
     </header>
 
     <div class="controls">
@@ -402,7 +408,7 @@
             <label>Navigation</label>
             <button class="nav-btn" id="prevBtn" disabled>⏮ Previous Slide</button>
             <button class="nav-btn" id="nextBtn" disabled>Next Slide ⏭</button>
-            <div class="status-badge" id="slideCounter">Slide: 0 / 0</div>
+            <div class="status-badge" id="slideCounter">Slide: 1 / 1</div>
             
             <hr style="border-color:#2a2a35; margin: 4px 0;">
             
@@ -422,33 +428,65 @@
                 </select>
             </div>
 
-            <div class="video-control-box">
-                <label>Background Track</label>
-                <select id="musicSelect">
-                    <option value="procedural">🎵 AI 8-Bit Anime Synth (CORS-Safe)</option>
-                    <option value="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3">🎵 Neo-Tokyo Synthwave</option>
-                    <option value="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3">🎵 Lofi Anime Chill</option>
-                    <option value="custom">📁 Upload Custom MP3...</option>
-                </select>
-                <input type="file" id="customAudioFile" accept="audio/mp3,audio/*" style="display: none; padding: 4px; margin-top: 5px;">
-            </div>
-
-            <button class="nav-btn" id="downloadVideoBtn" style="background: linear-gradient(135deg, #ff0055, #ff5500); color: white; font-weight: 800;" disabled>🎬 Export Full Video (.WebM)</button>
+            <button class="nav-btn" id="downloadVideoBtn" style="background: linear-gradient(135deg, #ff0055, #ff5500); color: white; font-weight: 800;" disabled>🎬 Export Video (.WebM)</button>
         </div>
     </div>
 
     <script>
         const ANILIST_CONFIG = {
-            clientId: "41604",
-            clientSecret: "A1z4JER5XqPuyhUIIMtnkAow1zCY2vBVzTSOcSbh",
             graphqlEndpoint: "https://graphql.anilist.co"
         };
+
+        const SEASON_QUERY = `
+            query ($season: MediaSeason, $seasonYear: Int, $genre: String, $tag: String) {
+                Page(page: 1, perPage: 50) {
+                    media(season: $season, seasonYear: $seasonYear, genre: $genre, tag: $tag, type: ANIME, sort: POPULARITY_DESC) {
+                        id
+                        popularity
+                        title {
+                            english
+                            romaji
+                        }
+                        episodes
+                        genres
+                        tags {
+                            name
+                        }
+                        externalLinks {
+                            site
+                        }
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        coverImage {
+                            extraLarge
+                            large
+                        }
+                        bannerImage
+                    }
+                }
+            }`;
+
+        const RATE_LIMIT_MIN_GAP_MS = 2200;
+        const anilistState = {
+            lastRequestAt: 0,
+            chain: Promise.resolve()
+        };
+
+        const seasonCache = new Map();
+        const ISEKAI_UNION_TAGS = ["Isekai", "Video Games"];
+        const ISEKAI_BADGE_TAGS = ["Isekai", "Video Games", "Virtual World"];
+        const DUB_STREAMING_PLATFORMS = ["netflix", "amazon prime video", "hulu", "disney", "hbo max", "max", "crunchyroll", "funimation"];
+        const genreBadgePriority = ["Fantasy", "Action", "Adventure", "Sci-Fi", "Romance", "Drama", "Comedy", "Supernatural", "Mystery", "Slice of Life"];
 
         const monthNames = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
         
         let currentSlidesData = [];
         let currentSlideIdx = 0;
         let dynamicGenreImage = "";
+        let generationSeq = 0;
 
         const fetchBtn = document.getElementById('fetchBtn');
         const loader = document.getElementById('loader');
@@ -460,12 +498,12 @@
         const downloadCurrentBtn = document.getElementById('downloadCurrentBtn');
         const downloadAllBtn = document.getElementById('downloadAllBtn');
         const downloadVideoBtn = document.getElementById('downloadVideoBtn');
-        const musicSelect = document.getElementById('musicSelect');
-        const customAudioFile = document.getElementById('customAudioFile');
-
-        musicSelect.addEventListener('change', (e) => {
-            customAudioFile.style.display = (e.target.value === 'custom') ? 'block' : 'none';
-        });
+        function getSeason(monthNum) {
+            if (monthNum >= 10) return "FALL";
+            if (monthNum <= 3) return "WINTER";
+            if (monthNum <= 6) return "SPRING";
+            return "SUMMER";
+        }
 
         function generateDynamicDropdown() {
             const now = new Date();
@@ -483,10 +521,7 @@
                     y += 1;
                 }
 
-                let season = "SUMMER";
-                if (m >= 10) season = "FALL";
-                else if (m <= 3) season = "WINTER";
-                else if (m >= 4 && m <= 6) season = "SPRING";
+                const season = getSeason(m);
 
                 const opt = document.createElement('option');
                 opt.value = `${y}-${m}`;
@@ -531,158 +566,207 @@
             }
         }
 
-        async function generateLayout() {
-            loader.innerText = "Querying AniList & MAL Database...";
-            loader.style.display = 'block';
-            
-            const [targetYear, targetMonthNum] = monthSelect.value.split('-').map(Number);
-            const targetMonthName = monthNames[targetMonthNum];
-            const genreSelection = document.getElementById('genreSelect').value;
-
-            try {
-                await fetchGenreRepresentativeImage(genreSelection);
-                await fetchFromAniList(genreSelection, targetMonthNum, targetMonthName, targetYear);
-                buildHTML(genreSelection, targetMonthName, targetYear);
-            } catch (error) {
-                console.error("AniList Fetch Error:", error);
-                alert("Error fetching from AniList. Please try again.");
-            } finally {
-                loader.style.display = 'none';
-            }
+        function escapeHTML(value) {
+            return String(value).replace(/[&<>"]/g, (ch) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;'
+            }[ch]));
         }
 
-        async function fetchGenreRepresentativeImage(genreOrTag) {
-            const isIsekai = (genreOrTag === "Isekai");
-            const query = `
-            query ($genre: String, $tag: String) {
-                Page(page: 1, perPage: 1) {
-                    media(genre: $genre, tag: $tag, type: ANIME, sort: POPULARITY_DESC) {
-                        bannerImage
-                        coverImage {
-                            extraLarge
-                            large
-                        }
-                    }
+        function anilistSlot() {
+            const run = anilistState.chain.then(async () => {
+                const wait = anilistState.lastRequestAt + RATE_LIMIT_MIN_GAP_MS - Date.now();
+                if (wait > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, wait));
                 }
-            }`;
-
-            const variables = isIsekai ? { tag: "Isekai" } : { genre: genreOrTag };
-
-            const response = await fetch(ANILIST_CONFIG.graphqlEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, variables })
+                anilistState.lastRequestAt = Date.now();
             });
-
-            const result = await response.json();
-            const topMedia = result.data?.Page?.media?.[0];
-            
-            if (topMedia) {
-                dynamicGenreImage = topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large || "";
-            } else {
-                dynamicGenreImage = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600";
-            }
+            anilistState.chain = run.catch(() => {});
+            return run;
         }
 
-        async function fetchFromAniList(genreOrTag, monthNum, monthName, targetYear) {
-            let season = "SUMMER";
-            if (monthNum >= 10) season = "FALL";
-            else if (monthNum <= 3) season = "WINTER";
-            else if (monthNum >= 4 && monthNum <= 6) season = "SPRING";
-
-            const isIsekai = (genreOrTag === "Isekai");
-            
-            const query = `
-            query ($season: MediaSeason, $seasonYear: Int, $genre: String, $tag: String) {
-                Page(page: 1, perPage: 50) {
-                    media(season: $season, seasonYear: $seasonYear, genre: $genre, tag: $tag, type: ANIME, sort: POPULARITY_DESC) {
-                        id
-                        title {
-                            english
-                            romaji
-                        }
-                        episodes
-                        genres
-                        popularity
-                        tags {
-                            name
-                        }
-                        startDate {
-                            year
-                            month
-                            day
-                        }
-                        coverImage {
-                            extraLarge
-                            large
-                        }
-                        bannerImage
-                    }
-                }
-            }`;
-
-            const variables = {
-                season: season,
-                seasonYear: targetYear
-            };
-
-            if (isIsekai) {
-                variables.tag = "Isekai";
-            } else {
-                variables.genre = genreOrTag;
-            }
-
-            const response = await fetch(ANILIST_CONFIG.graphqlEndpoint, {
+        async function anilistQuery(variables) {
+            await anilistSlot();
+            let response = await fetch(ANILIST_CONFIG.graphqlEndpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
+                    'Accept': 'application/json'
                 },
-                body: JSON.stringify({ query, variables })
+                body: JSON.stringify({ query: SEASON_QUERY, variables })
             });
+
+            if (response.status === 429) {
+                const resetEpoch = Number(response.headers.get('X-RateLimit-Reset'));
+                const waitMs = Number.isFinite(resetEpoch) && resetEpoch > 0
+                    ? Math.min(Math.max(Math.ceil(resetEpoch * 1000 - Date.now()), 1000), 60000)
+                    : 30000;
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
+                await anilistSlot();
+                response = await fetch(ANILIST_CONFIG.graphqlEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ query: SEASON_QUERY, variables })
+                });
+            }
+
+            if (!response.ok) {
+                throw new Error(`AniList HTTP ${response.status}`);
+            }
 
             const result = await response.json();
-            let allMedia = result.data?.Page?.media || [];
+            if (result.errors && result.errors.length > 0) {
+                throw new Error(result.errors[0].message || 'AniList query failed');
+            }
+            return result.data?.Page?.media || [];
+        }
 
-            let filteredMediaList = allMedia.filter(anime => anime.startDate && anime.startDate.month === monthNum);
+        async function runSeasonQuery(genreOrTag, season, targetYear) {
+            if (genreOrTag === "Isekai") {
+                const merged = [];
+                const seenIds = new Set();
 
-            currentSlidesData = filteredMediaList.map(anime => {
-                const title = anime.title.english || anime.title.romaji;
-                const episodes = anime.episodes ? `${anime.episodes}` : "12+";
-                
-                let displayGenres = anime.genres ? anime.genres.slice(0, 2) : [];
-                const hasIsekaiTag = anime.tags?.some(t => t.name === "Isekai");
-                if (hasIsekaiTag && !displayGenres.includes("Isekai")) {
-                    displayGenres.push("Isekai");
-                }
-                const genreString = displayGenres.slice(0, 3).join(" • ");
-                
-                let posterImage = anime.coverImage?.extraLarge || anime.coverImage?.large || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600' viewBox='0 0 400 600'><rect width='100%' height='100%' fill='%2314141b'/><text x='50%' y='50%' fill='%23555566' font-family='sans-serif' font-size='18' font-weight='bold' text-anchor='middle'>Image Unavailable</text></svg>";
-
-                let dateText = `Releasing: ${monthName} ${targetYear}`;
-                if (anime.startDate?.month) {
-                    const mName = monthNames[anime.startDate.month];
-                    dateText = `Release Date: ${mName} ${anime.startDate.day || ''}, ${anime.startDate.year || targetYear}`;
+                for (const tagName of ISEKAI_UNION_TAGS) {
+                    const rows = await anilistQuery({ season, seasonYear: targetYear, tag: tagName });
+                    for (const row of rows) {
+                        if (seenIds.has(row.id)) continue;
+                        seenIds.add(row.id);
+                        merged.push(row);
+                    }
                 }
 
-                let audioFormat = "Sub";
-                if (anime.popularity > 25000) {
-                    audioFormat = "Sub & Dub";
-                } else if (anime.id % 5 === 0) {
-                    audioFormat = "Dub Only";
-                } else {
-                    audioFormat = "Sub Only";
-                }
+                return merged.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+            }
 
-                return {
-                    title: title,
-                    episodes: episodes,
-                    genres: genreString,
-                    releaseText: dateText,
-                    audioFormat: audioFormat,
-                    posterImage: posterImage
-                };
-            });
+            return anilistQuery({ season, seasonYear: targetYear, genre: genreOrTag });
+        }
+
+        function buildSlideData(anime, activeGenre, monthName, targetYear) {
+            const titles = anime.title || {};
+            const title = titles.english || titles.romaji || "Untitled Anime";
+            const episodes = anime.episodes ? `${anime.episodes}` : "12+";
+
+            const tagNames = (anime.tags || []).map((t) => t.name);
+            const hasIsekaiSignal = ISEKAI_BADGE_TAGS.some((t) => tagNames.includes(t));
+            const badgeParts = [];
+
+            if (activeGenre !== "Isekai" && (anime.genres || []).includes(activeGenre)) {
+                badgeParts.push(activeGenre);
+            }
+            if (hasIsekaiSignal) {
+                badgeParts.push("Isekai");
+            }
+            for (const genre of [...genreBadgePriority, ...(anime.genres || [])]) {
+                if (badgeParts.length >= 4) break;
+                if ((anime.genres || []).includes(genre) && !badgeParts.includes(genre)) {
+                    badgeParts.push(genre);
+                }
+            }
+            const genreString = badgeParts.join(" • ") || "Anime";
+
+            const posterImage = anime.coverImage?.extraLarge || anime.coverImage?.large || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600' viewBox='0 0 400 600'><rect width='100%' height='100%' fill='%2314141b'/><text x='50%' y='50%' fill='%23555566' font-family='sans-serif' font-size='18' font-weight='bold' text-anchor='middle'>Image Unavailable</text></svg>";
+
+            let dateText = `Releasing: ${monthName} ${targetYear}`;
+            if (anime.startDate?.month) {
+                const mName = monthNames[anime.startDate.month];
+                dateText = `Release Date: ${mName} ${anime.startDate.day || ''}, ${anime.startDate.year || targetYear}`;
+            }
+
+            const streamSites = (anime.externalLinks || []).map((link) => (link.site || '').toLowerCase());
+            const audioFormat = streamSites.some((site) => DUB_STREAMING_PLATFORMS.some((platform) => site.includes(platform)))
+                ? "Sub & Dub"
+                : "Sub";
+
+            return {
+                title: escapeHTML(title),
+                episodes: episodes,
+                genres: escapeHTML(genreString),
+                releaseText: escapeHTML(dateText),
+                audioFormat: audioFormat,
+                posterImage: posterImage
+            };
+        }
+
+        async function fetchSeasonMedia(genreOrTag, monthNum, monthName, targetYear) {
+            const season = getSeason(monthNum);
+            const cacheKey = `${genreOrTag}|${season}|${targetYear}`;
+
+            if (!seasonCache.has(cacheKey)) {
+                seasonCache.set(cacheKey, await runSeasonQuery(genreOrTag, season, targetYear));
+            }
+            const allMedia = seasonCache.get(cacheKey);
+
+            let banner = "";
+            const topMedia = allMedia[0];
+            if (topMedia) {
+                banner = topMedia.bannerImage || topMedia.coverImage?.extraLarge || topMedia.coverImage?.large || "";
+            }
+
+            const monthMedia = allMedia.filter((anime) => anime.startDate && anime.startDate.month === monthNum);
+
+            return {
+                banner: banner || "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=600",
+                slides: monthMedia.map((anime) => buildSlideData(anime, genreOrTag, monthName, targetYear))
+            };
+        }
+
+        async function generateLayout() {
+            const gen = ++generationSeq;
+
+            shortsPlayer.querySelectorAll('.slide').forEach((el) => el.remove());
+            currentSlidesData = [];
+            currentSlideIdx = 0;
+            dynamicGenreImage = "";
+            updateNav(0);
+            slideCounter.innerText = 'Slide: 0 / 0';
+
+            loader.innerText = "Querying AniList...";
+            loader.style.display = 'block';
+            fetchBtn.disabled = true;
+
+            const [targetYear, targetMonthNum] = monthSelect.value.split('-').map(Number);
+            const targetMonthName = monthNames[targetMonthNum];
+            const genreSelection = document.getElementById('genreSelect').value;
+            loader.innerText = `Querying AniList • ${genreSelection} • ${targetMonthName} ${targetYear}`;
+
+            try {
+                const media = await fetchSeasonMedia(genreSelection, targetMonthNum, targetMonthName, targetYear);
+                if (gen !== generationSeq) return;
+
+                dynamicGenreImage = media.banner;
+                currentSlidesData = media.slides;
+                buildHTML(genreSelection, targetMonthName, targetYear);
+            } catch (error) {
+                if (gen !== generationSeq) return;
+                console.error("AniList Fetch Error:", error);
+                showErrorSlide(error);
+            } finally {
+                if (gen === generationSeq) {
+                    loader.style.display = 'none';
+                    fetchBtn.disabled = false;
+                }
+            }
+        }
+
+        function showErrorSlide(error) {
+            shortsPlayer.querySelectorAll('.slide').forEach((el) => el.remove());
+            currentSlidesData = [];
+            currentSlideIdx = 0;
+
+            const errorSlide = document.createElement('div');
+            errorSlide.className = 'slide active';
+            errorSlide.innerHTML = `
+                <div class="hook-content" style="background: radial-gradient(circle at center, #26101b 0%, #050508 100%);">
+                    <h2 style="font-size:2.1rem;">Couldn't reach AniList<br><span style="color:var(--accent-pink); display:block; font-size:1.3rem;">${escapeHTML(error.message || 'Unknown error')}</span>Try again shortly</h2>
+                </div>
+            `;
+            shortsPlayer.appendChild(errorSlide);
+            slideCounter.innerText = 'Slide: 1 / 1';
         }
 
         function buildHTML(genre, monthName, targetYear) {
@@ -703,8 +787,11 @@
 
             const hookSlide = document.createElement('div');
             hookSlide.className = 'slide active';
+            const hookStyle = dynamicGenreImage
+                ? `background-image: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.45)), url('${dynamicGenreImage}')`
+                : 'background: radial-gradient(circle at center, #0b1c26 0%, #050508 100%);';
             hookSlide.innerHTML = `
-                <div class="hook-content" style="background-image: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.45)), url('${dynamicGenreImage}')">
+                <div class="hook-content" style="${hookStyle}">
                     <h2>${genre} ANIME<br>RELEASING THIS ${monthName.toUpperCase()}</h2>
                 </div>
             `;
@@ -754,9 +841,9 @@
             const slides = shortsPlayer.querySelectorAll('.slide');
             if (slides.length === 0) return;
 
-            slides[currentSlideIdx].classList.remove('active');
-            currentSlideIdx += direction;
-            slides[currentSlideIdx].classList.add('active');
+            currentSlideIdx = Math.max(0, Math.min(slides.length - 1, currentSlideIdx + direction));
+
+            slides.forEach((el, idx) => el.classList.toggle('active', idx === currentSlideIdx));
 
             updateNav(slides.length);
         }
@@ -781,48 +868,6 @@
             link.download = filename;
             link.href = canvas.toDataURL('image/png');
             link.click();
-        }
-
-        function setupProceduralSynth(audioCtx, totalDuration) {
-            const outputGain = audioCtx.createGain();
-            outputGain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-
-            const notes = [261.63, 293.66, 329.63, 392.00, 440.00]; 
-            const startTime = audioCtx.currentTime;
-            
-            for (let time = 0; time < totalDuration; time += 0.4) {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                
-                osc.type = (Math.random() > 0.4) ? 'sine' : 'triangle';
-                const freq = notes[Math.floor(Math.random() * notes.length)] * (Math.random() > 0.75 ? 2 : 1);
-                
-                osc.frequency.setValueAtTime(freq, startTime + time);
-                gain.gain.setValueAtTime(0.08, startTime + time);
-                gain.gain.exponentialRampToValueAtTime(0.001, startTime + time + 0.35);
-                
-                osc.connect(gain);
-                gain.connect(outputGain);
-                osc.start(startTime + time);
-                osc.stop(startTime + time + 0.38);
-            }
-
-            for (let time = 0; time < totalDuration; time += 0.8) {
-                const kick = audioCtx.createOscillator();
-                const kickGain = audioCtx.createGain();
-                kick.frequency.setValueAtTime(75, startTime + time);
-                kick.frequency.exponentialRampToValueAtTime(0.01, startTime + time + 0.15);
-                
-                kickGain.gain.setValueAtTime(0.25, startTime + time);
-                kickGain.gain.exponentialRampToValueAtTime(0.001, startTime + time + 0.18);
-                
-                kick.connect(kickGain);
-                kickGain.connect(outputGain);
-                kick.start(startTime + time);
-                kick.stop(startTime + time + 0.2);
-            }
-
-            return outputGain;
         }
 
         async function exportToVideo() {
@@ -858,55 +903,22 @@
                 slides[currentSlideIdx].classList.add('active');
                 slideCounter.innerText = `Slide: ${currentSlideIdx + 1} / ${slides.length}`;
 
-                downloadVideoBtn.innerText = "🎬 Compiling Audio Stream...";
+                downloadVideoBtn.innerText = "🎬 Preparing Video Stream...";
 
-                // Step 2: Build canvas pipelines and system logic nodes
+                // Step 2: Build canvas pipeline for the recording
                 const recCanvas = document.createElement('canvas');
                 recCanvas.width = 720;
                 recCanvas.height = 1280;
                 const recCtx = recCanvas.getContext('2d');
 
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const dest = audioCtx.createMediaStreamDestination();
-                
-                let audioNode;
-                let audioElem = null;
-                const musicVal = musicSelect.value;
-
-                if (musicVal === 'procedural') {
-                    audioNode = setupProceduralSynth(audioCtx, totalDuration);
-                    audioNode.connect(dest);
-                    audioNode.connect(audioCtx.destination);
-                } else {
-                    audioElem = document.createElement('audio');
-                    audioElem.crossOrigin = "anonymous";
-                    if (musicVal === 'custom') {
-                        if (customAudioFile.files.length === 0) {
-                            alert("Please upload a custom MP3 audio file first!");
-                            throw new Error("Missing audio element asset link mapping targets.");
-                        }
-                        audioElem.src = URL.createObjectURL(customAudioFile.files[0]);
-                    } else {
-                        audioElem.src = musicVal;
-                    }
-                    
-                    audioNode = audioCtx.createMediaElementSource(audioElem);
-                    audioNode.connect(dest);
-                    audioNode.connect(audioCtx.destination);
-                }
-
-                // Step 3: Instantiate Media Stream Engine pipelines
                 const videoStream = recCanvas.captureStream(30);
-                const combinedStream = new MediaStream();
-                videoStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
-                dest.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
 
-                let options = { mimeType: 'video/webm;codecs=vp9,opus' };
-                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'video/webm;codecs=vp8,opus' };
+                let options = { mimeType: 'video/webm;codecs=vp9' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'video/webm;codecs=vp8' };
                 if (!MediaRecorder.isTypeSupported(options.mimeType)) options = { mimeType: 'video/webm' };
                 if (!MediaRecorder.isTypeSupported(options.mimeType)) options = {};
 
-                const mediaRecorder = new MediaRecorder(combinedStream, options);
+                const mediaRecorder = new MediaRecorder(videoStream, options);
                 const chunks = [];
                 mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
@@ -918,15 +930,11 @@
                     link.download = `Animemax_Short_${Date.now()}.webm`;
                     link.click();
                     
-                    if (audioElem) audioElem.pause();
-                    audioCtx.close();
-                    
                     downloadVideoBtn.innerText = origText;
                     updateNav(slides.length);
                 };
 
                 mediaRecorder.start();
-                if (audioElem) audioElem.play();
 
                 const fps = 30;
                 const frameInterval = 1000 / fps;
